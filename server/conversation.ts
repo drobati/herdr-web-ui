@@ -42,7 +42,7 @@ import { herdrRpc, paneRead, sessionSnapshot, type ProcessInfo } from "./herdr/c
 import { resolveAgent } from "./pane-context.ts";
 import { codexHistorySegments, createCodexTranscriptParser, codexOutputText, codexTranscriptPath, defaultCodexHome, forgetAllCodexState, forgetCodexStateFor, paneCodexHome, parseCodexTranscript, readRange } from "./codex.ts";
 import { CODEX_IMAGE_REF, codexTranscriptImage } from "./codex-images.ts";
-import { AmbiguousClaudeStore, claudeProcessSession, claudeTranscriptFile, defaultClaudeConfigDir, forgetClaudeSessionFile, forgetClaudeSessions, isClaudeProcess, processClaudeConfigDir } from "./claude-store.ts";
+import { AmbiguousClaudeStore, claudeBackgroundSessionByName, claudeProcessSession, claudeTranscriptFile, defaultClaudeConfigDir, forgetClaudeSessionFile, forgetClaudeSessions, isClaudeProcess, processClaudeConfigDir } from "./claude-store.ts";
 import { forgetGjcPane, forgetGjcState, gjcPidUnderShell, gjcTranscriptForPane, isGjcProcess, storeRelative } from "./gjc-runtime.ts";
 import { isOmoProcess, omoProcessIdentity, omoSessionForPane, processEnviron } from "./omo.ts";
 import { processStartedAt } from "./process-start.ts";
@@ -374,6 +374,14 @@ export function parseClaudeTranscript(text: string, maxTurns = MAX_TURNS, option
       const said = loneNotice(before);
       if (before && said?.source === "informational" && writtenTogether(before.ts, ts)) turns[at - 1] = { ...before, parts: [{ ...said, text: capNotice(`${said.text}\n${text}`) }] };
       else turns.splice(at, 0, { role: "user", ts, parts: [{ kind: "notice", text, source: "informational" }] });
+      continue;
+    }
+
+    // Claude Code's recap ("※ recap: ..." in the terminal) for someone coming back to the session.
+    // Same notice placement as above, so a recap written mid-turn doesn't split the turn.
+    if (entry.type === "system" && entry.subtype === "away_summary") {
+      const text = typeof entry.content === "string" ? capNotice(stripTerminalControls(entry.content).trim()) : "";
+      if (text.length > 0) turns.splice(noticeAt(), 0, { role: "user", ts: entry.timestamp ?? null, parts: [{ kind: "notice", text, source: "recap" }] });
       continue;
     }
 
@@ -1601,7 +1609,7 @@ export async function claudePanePid(pane: HerdrPane): Promise<number | null> {
  * of the pane's Claude process (a launcher can give each environment its own CLAUDE_CONFIG_DIR).
  */
 async function claudeTranscriptPath(paneId: string, cwds: readonly (string | null | undefined)[], onProcess?: (pid: number) => void): Promise<string> {
-  const info = await herdrRpc<{ agent: { agent_session?: { value?: unknown } } }>("agent.get", { target: paneId });
+  const info = await herdrRpc<{ agent: { agent_session?: { value?: unknown }; terminal_title_stripped?: unknown } }>("agent.get", { target: paneId });
   let session = info.agent.agent_session?.value;
   const home = process.env["HOME"] ?? "";
   const processes = await claudeProcesses(paneId);
@@ -1617,6 +1625,9 @@ async function claudeTranscriptPath(paneId: string, cwds: readonly (string | nul
   }
   const configDir = processDir || defaultClaudeConfigDir(home);
   if ((typeof session !== "string" || !SESSION_ID.test(session)) && only) session = await claudeProcessSession(home, only.pid, configDir);
+  // the pane's Claude is only the front end of a background session: its title names the session
+  const title = info.agent.terminal_title_stripped;
+  if ((typeof session !== "string" || !SESSION_ID.test(session)) && only && typeof title === "string") session = await claudeBackgroundSessionByName(title, configDir);
   if (typeof session !== "string" || !SESSION_ID.test(session)) throw new ConversationUnavailable("no_session_id");
   const path = await claudeTranscriptFile(home, session, cwds, configDir);
   // Claude writes the file with its first message: until then the session it reports holds nothing

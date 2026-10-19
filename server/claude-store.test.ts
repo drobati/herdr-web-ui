@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, win32 } from "node:path";
-import { AmbiguousClaudeStore, claudeProcessSession, claudeSessionTempDir, claudeStoreKey, claudeProjectDir, claudeTranscriptFile, configDirInPsLine, forgetClaudeSessions, isClaudeProcess, processClaudeConfigDir } from "./claude-store.ts";
+import { AmbiguousClaudeStore, claudeBackgroundSessionByName, claudeProcessSession, claudeSessionTempDir, claudeStoreKey, claudeProjectDir, claudeTranscriptFile, configDirInPsLine, forgetClaudeSessions, isClaudeProcess, processClaudeConfigDir } from "./claude-store.ts";
 import type { ProcessRow } from "./windows-processes.ts";
 
 const NATIVE = process.platform === "linux" || process.platform === "darwin";
@@ -393,6 +393,31 @@ describe("a Windows Claude's store", () => {
     mkdirSync(join(dir, ".claude-second", "sessions"), { recursive: true });
     expect(await storeOf(dir)).toBe(join(dir, ".claude"));
     expect(await claudeProcessSession(dir, PID, join(dir, ".claude"), "win32", table)).toBe(SESSION);
+  });
+
+  it("names a background session by the title its attached front end gives the pane", async () => {
+    const dir = home();
+    const store = join(dir, ".claude");
+    // Claude 2.1.301 under `claude agents`: the session's record is the daemon's process, kind bg
+    record(store, { kind: "bg", name: "ratiodebt health audit" });
+    expect(await claudeBackgroundSessionByName("ratiodebt health audit", store, "win32", table)).toBe(SESSION);
+    expect(await claudeBackgroundSessionByName("another session", store, "win32", table)).toBeNull();
+    // a PID reused by another process is not the session any more
+    expect(await claudeBackgroundSessionByName("ratiodebt health audit", store, "win32", async () => [])).toBeNull();
+    // an interactive record has its own front end and PID path; this lookup leaves it alone
+    record(store, { kind: "interactive", name: "ratiodebt health audit" });
+    expect(await claudeBackgroundSessionByName("ratiodebt health audit", store, "win32", table)).toBeNull();
+  });
+
+  it("names no background session when two live ones share the title", async () => {
+    const dir = home();
+    const store = join(dir, ".claude");
+    record(store, { kind: "bg", name: "audit" });
+    writeFileSync(join(store, "sessions", `${PID + 1}.json`), JSON.stringify({
+      pid: PID + 1, sessionId: "1b8e6f0e-8d3f-4c1a-9a53-6c2b7a1d9e42", procStart: PROC_START, kind: "bg", name: "audit",
+    }));
+    const both = async (): Promise<ProcessRow[]> => [...await table(), { ...(await table())[0]!, pid: PID + 1 }];
+    expect(await claudeBackgroundSessionByName("audit", store, "win32", both)).toBeNull();
   });
 
   it("finds a ~/.claude-* store by its live PID record, and the transcript in it before ~/.claude's", async () => {

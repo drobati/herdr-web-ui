@@ -333,23 +333,63 @@ export async function claudeProcessSession(
       !("sessionId" in record) || typeof record.sessionId !== "string" ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(record.sessionId) ||
       !("procStart" in record) || typeof record.procStart !== "string") return null;
-    if (platform === "linux") {
-      if (!/^\d+$/.test(record.procStart)) return null;
-      const processStat = await readFile(`/proc/${pid}/stat`, "utf8");
-      const fields = processStat.slice(processStat.lastIndexOf(") ") + 2).split(" ");
-      if (fields[19] !== record.procStart) return null;
-    } else if (platform === "win32") {
-      // an unreadable table (no rows) leaves the process unknown, and so the record
-      const started = fileTimeMs(record.procStart);
-      if (started === null || (await table()).find((row) => row.pid === pid)?.started !== started) return null;
-    } else if (await darwinProcessStart(pid) !== record.procStart.replace(/\s+/g, " ").trim()) return null;
-    return record.sessionId;
+    return await procStartMatches(pid, record.procStart, platform, table) ? record.sessionId : null;
   } catch (error) {
     // A closed process, absent/older native store or a torn write gives no identity.
     if (error instanceof SyntaxError || absent(error) ||
       (error !== null && typeof error === "object" && "code" in error && ["EACCES", "EPERM", "ESRCH", "ELOOP", "ENXIO"].includes(String(error.code)))) return null;
     throw error;
   }
+}
+
+/** Whether `pid` is still the process a record's procStart names (not a later one reusing the PID). */
+async function procStartMatches(pid: number, procStart: string, platform: string, table: () => Promise<ProcessRow[]>): Promise<boolean> {
+  if (platform === "linux") {
+    if (!/^\d+$/.test(procStart)) return false;
+    const processStat = await readFile(`/proc/${pid}/stat`, "utf8");
+    const fields = processStat.slice(processStat.lastIndexOf(") ") + 2).split(" ");
+    return fields[19] === procStart;
+  }
+  if (platform === "win32") {
+    // an unreadable table (no rows) leaves the process unknown, and so the record
+    const started = fileTimeMs(procStart);
+    return started !== null && (await table()).find((row) => row.pid === pid)?.started === started;
+  }
+  return await darwinProcessStart(pid) === procStart.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * A pane attached to a background session (`claude agents`, or a session sent to the background)
+ * holds only Claude's front end: the session runs in Claude's daemon, outside the pane, so neither
+ * Herdr's hook nor the front end's PID record names it. The front end titles the terminal with the
+ * session's name, which the session's own record carries: the one live `bg` record of that name is
+ * the pane's session. Two of the same name name none.
+ */
+export async function claudeBackgroundSessionByName(
+  name: string,
+  configDir: string,
+  platform: string = process.platform,
+  table: () => Promise<ProcessRow[]> = recentProcessTable,
+): Promise<string | null> {
+  if ((platform !== "linux" && platform !== "darwin" && platform !== "win32") || name.trim().length === 0) return null;
+  let entries: string[];
+  try { entries = await readdir(join(configDir, "sessions")); } catch (error) { if (absent(error)) return null; throw error; }
+  const matches = new Set<string>();
+  for (const entry of entries) {
+    if (!/^\d+\.json$/.test(entry)) continue;
+    try {
+      const record: unknown = JSON.parse(await readFile(join(configDir, "sessions", entry), "utf8"));
+      if (record === null || typeof record !== "object" ||
+        !("kind" in record) || record.kind !== "bg" ||
+        !("name" in record) || record.name !== name.trim() ||
+        !("pid" in record) || typeof record.pid !== "number" ||
+        !("sessionId" in record) || typeof record.sessionId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(record.sessionId) ||
+        !("procStart" in record) || typeof record.procStart !== "string") continue;
+      if (await procStartMatches(record.pid, record.procStart, platform, table)) matches.add(record.sessionId);
+    } catch { /* a torn write or a session that just ended: not this pane's */ }
+  }
+  return matches.size === 1 ? [...matches][0]! : null;
 }
 
 /**

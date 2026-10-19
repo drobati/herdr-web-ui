@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import type { PaneInfo } from "../../shared/protocol.ts";
-import { activityOrder, liveSeqs, newRecencyMemory, newSeenMemory, newSeqMemory, observedRecency, seenStatuses, shownStatus, stateSeqs } from "./sidebarOrder.ts";
+import { activityOrder, liveSeqs, newRecencyMemory, newSeenMemory, newSeqMemory, observedRecency, savedSeen, seenStatuses, shownStatus, stateSeqs } from "./sidebarOrder.ts";
 import { DEFAULT_SETTINGS, sanitizeSettings } from "./settings.ts";
 
 const pane = (id: string, agent_status: string, workspace_id = `w-${id}`) => ({ pane_id: id, workspace_id, agent_status }) as PaneInfo;
@@ -103,6 +103,31 @@ describe("seen statuses", () => {
     expect(next).toEqual(new Map([["a", "idle"], ["b", "done"]]));
     // looked at in herdr's TUI: herdr moves it to idle
     expect(seenStatuses(panes({ a: "done", b: "idle" }), counters({ a: 2, b: 2 }), "a", memory).get("b")).toBe("idle");
+  });
+});
+
+describe("seen statuses after a reload", () => {
+  const snap = (statuses: Record<string, string>, seqs: Record<string, number>) => ({
+    panes: Object.entries(statuses).map(([id, status]) => pane(id, status)),
+    agents: Object.entries(seqs).map(([pane_id, state_change_seq]) => ({ pane_id, state_change_seq })),
+  }) as never;
+  const seqs = (entries: Record<string, number>) => new Map(Object.entries(entries));
+
+  it("keeps a done looked at before the reload idle, and a later finish done", () => {
+    const before = newSeenMemory();
+    seenStatuses(snap({ a: "done", b: "done" }, { a: 4, b: 6 }), seqs({ a: 4, b: 6 }), "a", before);
+    expect(before.dirty).toBe(true);
+    const stored = savedSeen(before);
+    expect(stored).toEqual({ top: 6, panes: [["a", 4]] });
+    expect(seenStatuses(snap({ a: "done", b: "done" }, { a: 4, b: 6 }), seqs({ a: 4, b: 6 }), null, newSeenMemory(stored))).toEqual(new Map([["a", "idle"], ["b", "done"]]));
+    // a finished again after it was looked at
+    expect(seenStatuses(snap({ a: "done" }, { a: 9 }), seqs({ a: 9 }), null, newSeenMemory(stored)).get("a")).toBe("done");
+  });
+
+  it("forgets what was looked at once herdr restarts", () => {
+    const memory = newSeenMemory({ top: 50, panes: [["a", 40]] });
+    expect(seenStatuses(snap({ a: "done" }, { a: 3 }), seqs({ a: 3 }), null, memory).get("a")).toBe("done");
+    expect(savedSeen(memory)).toEqual({ top: 3, panes: [] });
   });
 });
 

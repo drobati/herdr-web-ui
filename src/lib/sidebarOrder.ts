@@ -89,20 +89,34 @@ export function observedRecency(seqs: ReadonlyMap<string, number>, memory: Recen
 
 /**
  * What `seenStatuses` remembers: each pane's last herdr status, the panes seen working, the counter of
- * each finish not looked at yet (`completed`), and the counter each pane was last looked at.
+ * each finish not looked at yet (`completed`), and the counter each pane was last looked at. `saved`
+ * is what outlives a reload: herdr's own counter each pane was looked at, with `top`, herdr's highest
+ * counter then; `dirty` says it changed since it was stored.
  */
-export interface SeenMemory { status: Map<string, unknown>; working: Set<string>; completed: Map<string, number>; viewed: Map<string, number> }
-export const newSeenMemory = (): SeenMemory => ({ status: new Map(), working: new Set(), completed: new Map(), viewed: new Map() });
+export interface SeenMemory { status: Map<string, unknown>; working: Set<string>; completed: Map<string, number>; viewed: Map<string, number>; saved: Map<string, number>; top: number; dirty: boolean }
+export interface SavedSeen { top: number; panes: [string, number][] }
+export const newSeenMemory = (saved?: SavedSeen | null): SeenMemory => ({
+  status: new Map(), working: new Set(), completed: new Map(), viewed: new Map(), saved: new Map(saved?.panes ?? []), top: saved?.top ?? 0, dirty: false,
+});
+export const savedSeen = (memory: SeenMemory): SavedSeen => ({ top: memory.top, panes: [...memory.saved] });
 
 /**
  * DONE as herdr's TUI draws it (client/shell/endpoint_agent_state.rs): a finish not looked at yet. A
  * pane seen working that comes to rest, or one herdr calls done, has finished; once it is shown
  * (`viewing`, the pane on screen) at or after that counter it reads idle. herdr moving a done to idle
- * (looked at in the TUI) clears it too. `seqs` is `liveSeqs`. Mutates `memory`.
+ * (looked at in the TUI) clears it too. herdr's done on a pane first seen since a reload, looked at
+ * before it at or after that counter (`saved`), stays idle. `seqs` is `liveSeqs`. Mutates `memory`.
  */
-export function seenStatuses(snapshot: Pick<SessionSnapshot, "panes"> | null | undefined, seqs: ReadonlyMap<string, number>, viewing: string | null, memory: SeenMemory): Map<string, AgentStatus> {
+export function seenStatuses(snapshot: Pick<SessionSnapshot, "panes" | "agents"> | null | undefined, seqs: ReadonlyMap<string, number>, viewing: string | null, memory: SeenMemory): Map<string, AgentStatus> {
   const shown = new Map<string, AgentStatus>();
   const panes = snapshot?.panes ?? [];
+  const real = stateSeqs(snapshot);
+  if (real.size > 0) {
+    const top = Math.max(...real.values());
+    // herdr's counter went back: it restarted, and the counters looked at are another session's
+    if (top < memory.top && memory.saved.size > 0) { memory.saved.clear(); memory.dirty = true; }
+    if (top !== memory.top) { memory.top = top; memory.dirty = true; }
+  }
   for (const pane of panes) {
     const id = pane.pane_id;
     const seq = seqs.get(id);
@@ -113,10 +127,16 @@ export function seenStatuses(snapshot: Pick<SessionSnapshot, "panes"> | null | u
     if (status === "working") { memory.working.add(id); memory.completed.delete(id); }
     else if (status === "done" || status === "idle") {
       if (memory.working.delete(id)) memory.completed.set(id, seq);
-      else if (status === "done" && !memory.completed.has(id)) memory.completed.set(id, seq);
-      else if (status === "idle" && before === "done") memory.completed.delete(id);
+      else if (status === "done" && !memory.completed.has(id)) {
+        memory.completed.set(id, seq);
+        if (before === undefined && (memory.saved.get(id) ?? -1) >= (real.get(id) ?? Infinity)) memory.viewed.set(id, seq);
+      } else if (status === "idle" && before === "done") memory.completed.delete(id);
     } else { memory.working.delete(id); memory.completed.delete(id); }
-    if (id === viewing) memory.viewed.set(id, seq);
+    if (id === viewing) {
+      memory.viewed.set(id, seq);
+      const own = real.get(id);
+      if (own !== undefined && memory.saved.get(id) !== own) { memory.saved.set(id, own); memory.dirty = true; }
+    }
     const finish = memory.completed.get(id);
     if (status === "done" || status === "idle") shown.set(id, finish !== undefined && !((memory.viewed.get(id) ?? -1) >= finish) ? "done" : "idle");
   }
@@ -124,6 +144,7 @@ export function seenStatuses(snapshot: Pick<SessionSnapshot, "panes"> | null | u
     const open = new Set(panes.map((pane) => pane.pane_id));
     for (const map of [memory.status, memory.completed, memory.viewed]) for (const id of map.keys()) if (!open.has(id)) map.delete(id);
     for (const id of memory.working) if (!open.has(id)) memory.working.delete(id);
+    for (const id of memory.saved.keys()) if (!open.has(id)) { memory.saved.delete(id); memory.dirty = true; }
   }
   return shown;
 }

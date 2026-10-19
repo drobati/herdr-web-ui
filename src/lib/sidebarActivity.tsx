@@ -8,7 +8,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Machine } from "../../shared/machines.ts";
 import type { AgentStatus, HerdrPane } from "../../shared/protocol.ts";
-import { liveSeqs, newRecencyMemory, newSeenMemory, newSeqMemory, observedRecency, seenStatuses, shownStatus, type RecencyMemory, type SeenMemory, type SeqMemory } from "./sidebarOrder.ts";
+import { liveSeqs, newRecencyMemory, newSeenMemory, newSeqMemory, observedRecency, savedSeen, seenStatuses, shownStatus, type RecencyMemory, type SavedSeen, type SeenMemory, type SeqMemory } from "./sidebarOrder.ts";
 
 export interface SidebarActivity {
   /** when this page saw each pane on a PC change, on one count across PCs; a pushed status change counts at once */
@@ -21,6 +21,25 @@ const NO_SEQS: ReadonlyMap<string, number> = new Map();
 const SidebarActivityContext = createContext<SidebarActivity>({ seqs: () => NO_SEQS, status: (_machineId, pane) => shownStatus(pane) });
 export const SidebarActivityProvider = SidebarActivityContext.Provider;
 export const useSidebarActivity = (): SidebarActivity => useContext(SidebarActivityContext);
+
+/** the panes looked at per PC, so a reload keeps a finish already seen idle: { [machineId]: SavedSeen } */
+const SEEN_KEY = "herdr-web-ui:seen-panes";
+function storedSeen(machineId: string): SavedSeen | null {
+  try {
+    const entry: unknown = (JSON.parse(localStorage.getItem(SEEN_KEY) ?? "{}") as Record<string, unknown>)[machineId];
+    const value = entry as Partial<SavedSeen> | undefined;
+    if (typeof value?.top !== "number" || !Array.isArray(value.panes)) return null;
+    return { top: value.top, panes: value.panes.filter((pair): pair is [string, number] => Array.isArray(pair) && typeof pair[0] === "string" && typeof pair[1] === "number") };
+  } catch { return null; /* storage denied or damaged: starts over */ }
+}
+function storeSeen(machineId: string, memory: SeenMemory): void {
+  memory.dirty = false;
+  try {
+    // re-read, so another app tab's PCs are kept
+    const all = JSON.parse(localStorage.getItem(SEEN_KEY) ?? "{}") as Record<string, SavedSeen>;
+    localStorage.setItem(SEEN_KEY, JSON.stringify({ ...all, [machineId]: savedSeen(memory) }));
+  } catch { /* storage denied: memory only */ }
+}
 
 const pageShown = (): boolean => typeof document === "undefined" || document.visibilityState !== "hidden";
 
@@ -36,10 +55,12 @@ export function useSidebarActivityState(machines: readonly Machine[], selectedMa
   }, []);
   const byMachine = useMemo(() => new Map(machines.map((machine) => {
     let memory = memories.current.get(machine.id);
-    if (!memory) memories.current.set(machine.id, memory = { live: newSeqMemory(), recency: newRecencyMemory(), seen: newSeenMemory() });
+    if (!memory) memories.current.set(machine.id, memory = { live: newSeqMemory(), recency: newRecencyMemory(), seen: newSeenMemory(storedSeen(machine.id)) });
     const live = liveSeqs(machine.snapshot, memory.live);
     const viewing = shown && machine.id === selectedMachineId ? selectedPaneId ?? null : null;
-    return [machine.id, { seqs: observedRecency(live, memory.recency, counter.current), statuses: seenStatuses(machine.snapshot, live, viewing, memory.seen) }] as const;
+    const statuses = seenStatuses(machine.snapshot, live, viewing, memory.seen);
+    if (memory.seen.dirty) storeSeen(machine.id, memory.seen);
+    return [machine.id, { seqs: observedRecency(live, memory.recency, counter.current), statuses }] as const;
   })), [machines, shown, selectedMachineId, selectedPaneId]);
   return useMemo<SidebarActivity>(() => ({
     seqs: (machineId) => byMachine.get(machineId)?.seqs ?? NO_SEQS,

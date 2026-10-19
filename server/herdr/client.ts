@@ -612,6 +612,8 @@ export async function agentGet(paneId: string, socketPath?: string): Promise<Age
 }
 
 export async function paneSendText(paneId: string, text: string, socketPath?: string, guard?: () => boolean): Promise<void> {
+  // herdr 0.9.3 on Windows drops a send_text that is exactly ESC (an ESC after other text arrives); its Escape key does not
+  if (text === "\u001b") return paneSendKeys(paneId, ["Escape"], socketPath, guard);
   await herdrRpc("pane.send_text", { pane_id: paneId, text }, socketPath, undefined, guard);
 }
 

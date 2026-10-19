@@ -640,6 +640,20 @@
   line-height: var(--lh-code);
 }
 
+/* a text picture: box-drawing glyphs join only at a line height near 1, and a wide one scrolls rather than wraps */
+.markdown-figure .hl-code {
+  line-height: 1.2;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.markdown-figure .figure-accent { color: var(--accent); }
+.markdown-figure .figure-warn { color: var(--status-blocked); }
+.markdown-figure .figure-ok { color: var(--status-done); }
+.markdown-figure .figure-note { color: var(--status-working); }
+.markdown-figure .figure-dim { color: var(--text-dim); }
+.markdown-figure .figure-strong { color: var(--text-strong); font-weight: 600; }
+
 .markdown-code-more {
   width: 100%;
   min-height: var(--control-h);

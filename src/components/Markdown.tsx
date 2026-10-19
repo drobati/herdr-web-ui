@@ -16,6 +16,7 @@ import { copyText } from "../lib/clipboard.ts";
 import { lazyChunk } from "../lib/lazyChunk.ts";
 import type { SkillMatcher } from "../lib/skillMentions.ts";
 import { previewChunks } from "../lib/textPreview.ts";
+import { figureLines } from "../lib/figure.ts";
 
 /** The pane's skill names: a name in an answer's plain text, in its trigger form, reads as a chip. */
 const SkillMatcherContext = createContext<SkillMatcher | null>(null);
@@ -290,6 +291,19 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
   );
 }
 
+/** A ```figure fence drawn as the picture it is: its `{role:text}` markup colors, and takes no columns (lib/figure.ts). */
+function FigureBlock({ value }: { value: string }) {
+  const lines = useMemo(() => figureLines(value), [value]);
+  return (
+    <div className="markdown-code markdown-figure" data-language="figure">
+      <pre className="hl-code"><code>{lines.map((spans, index) => <span className="hl-line" key={index}>
+        {spans.map((span, n) => span.role === null ? <Fragment key={n}>{span.text}</Fragment> : <span className={`figure-${span.role}`} key={n}>{span.text}</span>)}
+        {index < lines.length - 1 && "\n"}
+      </span>)}</code></pre>
+    </div>
+  );
+}
+
 function Blocks({ blocks }: { blocks: MarkdownBlock[] }) {
   return <>{blocks.map((block, index): ReactNode => {
     const key = `${block.type}-${index}`;
@@ -305,6 +319,7 @@ function Blocks({ blocks }: { blocks: MarkdownBlock[] }) {
       case "blockquote": return <blockquote key={key}><Blocks blocks={block.blocks} /></blockquote>;
       case "code": return block.language === "mermaid"
         ? <MermaidDiagram key={key} value={block.value} />
+        : block.language === "figure" ? <FigureBlock key={key} value={block.value} />
         : <CodeBlock key={key} language={block.language} value={block.value} />;
       case "math": return <MathExpression key={key} value={block.value} displayMode />;
       case "hr": return <hr key={key} />;

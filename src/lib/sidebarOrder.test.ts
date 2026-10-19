@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import type { PaneInfo } from "../../shared/protocol.ts";
-import { activityOrder, liveSeqs, newSeqMemory, shownStatus, stateSeqs } from "./sidebarOrder.ts";
+import { activityOrder, liveSeqs, newRecencyMemory, newSeenMemory, newSeqMemory, observedRecency, seenStatuses, shownStatus, stateSeqs } from "./sidebarOrder.ts";
 import { DEFAULT_SETTINGS, sanitizeSettings } from "./settings.ts";
 
 const pane = (id: string, agent_status: string, workspace_id = `w-${id}`) => ({ pane_id: id, workspace_id, agent_status }) as PaneInfo;
@@ -41,7 +41,7 @@ describe("live counters", () => {
     // both finish between two roster reads, a after b: herdr's counters say so, and stand
     const read = liveSeqs(snap({ a: "done", b: "done" }, { a: 21, b: 20 }), memory);
     expect([...read]).toEqual([["a", 21], ["b", 20]]);
-    expect(ids(activityOrder([pane("b", "done"), pane("a", "done")], (row) => row, read))).toEqual(["a", "b"]);
+    expect(ids(activityOrder([pane("b", "done"), pane("a", "done")], (row) => ({ status: row.agent_status, recent: read.get(row.pane_id) })))).toEqual(["a", "b"]);
     expect(memory.bumped.size).toBe(0);
   });
 
@@ -66,25 +66,57 @@ describe("live counters", () => {
 describe("activity order", () => {
   const agents = [pane("idle", "idle"), pane("working", "working"), pane("blocked", "blocked"), pane("done-old", "done"), pane("done-new", "done"), pane("nocount", "idle")];
   const seqs = new Map([["idle", 50], ["working", 10], ["blocked", 1], ["done-old", 20], ["done-new", 30]]);
-  const order = (rows: PaneInfo[], counters = seqs) => ids(activityOrder(rows, (row) => row, counters));
+  const order = (rows: PaneInfo[], counters = seqs, stale = new Set<string>()) =>
+    ids(activityOrder(rows, (row) => ({ status: row.agent_status, recent: counters.get(row.pane_id), stale: stale.has(row.pane_id) })));
 
-  it("puts blocked first, then the latest change first whatever the state", () => {
-    expect(order(agents)).toEqual(["blocked", "idle", "done-new", "done-old", "working", "nocount"]);
+  it("ranks states as herdr's TUI does, blocked, done, working, idle, then the latest change", () => {
+    expect(order(agents)).toEqual(["blocked", "done-new", "done-old", "working", "idle", "nocount"]);
   });
 
-  it("keeps the agent just worked in on top while it runs and after it finishes", () => {
-    // a message sent from "done-old": it starts working, so its counter is the newest
-    const sent = agents.map((entry) => entry.pane_id === "done-old" ? pane("done-old", "working") : entry);
-    const running = new Map([...seqs, ["done-old", 60]]);
-    expect(order(sent, running).slice(0, 2)).toEqual(["blocked", "done-old"]);
-    expect(order(agents, new Map([...running, ["done-old", 61]])).slice(0, 2)).toEqual(["blocked", "done-old"]);
+  it("puts a PC that is not connected last, whatever its states", () => {
+    expect(order(agents, seqs, new Set(["blocked"]))).toEqual(["done-new", "done-old", "working", "idle", "nocount", "blocked"]);
   });
 
-  it("puts a new agent on top, and keeps the given order between equals", () => {
+  it("keeps the given order between equals", () => {
     const fresh = [...agents, pane("new", "idle"), pane("tie", "idle")];
-    expect(order(fresh, new Map([...seqs, ["new", 99]])).slice(0, 2)).toEqual(["blocked", "new"]);
-    // without a counter, rows keep the order given, at the end
-    expect(order(fresh).slice(-3)).toEqual(["nocount", "new", "tie"]);
+    expect(order(fresh, new Map([...seqs, ["new", 99]])).slice(-4)).toEqual(["new", "idle", "nocount", "tie"]);
+  });
+});
+
+describe("seen statuses", () => {
+  const panes = (statuses: Record<string, string>) => ({ panes: Object.entries(statuses).map(([id, status]) => pane(id, status)) }) as never;
+  const counters = (entries: Record<string, number>) => new Map(Object.entries(entries));
+
+  it("shows a finish as done until its pane is on screen, then idle", () => {
+    const memory = newSeenMemory();
+    seenStatuses(panes({ a: "working", b: "idle" }), counters({ a: 1, b: 1 }), null, memory);
+    expect(seenStatuses(panes({ a: "idle", b: "idle" }), counters({ a: 2, b: 1 }), null, memory)).toEqual(new Map([["a", "done"], ["b", "idle"]]));
+    expect(seenStatuses(panes({ a: "idle", b: "idle" }), counters({ a: 2, b: 1 }), "a", memory).get("a")).toBe("idle");
+    // looked at once is enough: leaving the pane keeps it idle
+    expect(seenStatuses(panes({ a: "idle", b: "idle" }), counters({ a: 2, b: 1 }), null, memory).get("a")).toBe("idle");
+  });
+
+  it("never shows done for the pane on screen as it finishes, and takes herdr's done as not looked at", () => {
+    const memory = newSeenMemory();
+    seenStatuses(panes({ a: "working", b: "done" }), counters({ a: 1, b: 1 }), "a", memory);
+    const next = seenStatuses(panes({ a: "done", b: "done" }), counters({ a: 2, b: 1 }), "a", memory);
+    expect(next).toEqual(new Map([["a", "idle"], ["b", "done"]]));
+    // looked at in herdr's TUI: herdr moves it to idle
+    expect(seenStatuses(panes({ a: "done", b: "idle" }), counters({ a: 2, b: 2 }), "a", memory).get("b")).toBe("idle");
+  });
+});
+
+describe("observed recency", () => {
+  it("counts on one count across PCs, in each PC's counter order, only when a counter moves", () => {
+    const counter = { last: 0 };
+    const a = newRecencyMemory();
+    const b = newRecencyMemory();
+    expect([...observedRecency(new Map([["x", 9], ["y", 3]]), a, counter)]).toEqual([["y", 1], ["x", 2]]);
+    // the other PC's counter is lower, but it was seen later
+    expect(observedRecency(new Map([["z", 1]]), b, counter).get("z")).toBe(3);
+    expect(observedRecency(new Map([["x", 9], ["y", 4]]), a, counter)).toEqual(new Map([["y", 4], ["x", 2]]));
+    // a pane gone is forgotten
+    expect([...observedRecency(new Map([["y", 4]]), a, counter)]).toEqual([["y", 4]]);
   });
 });
 

@@ -87,12 +87,12 @@ export function AgentSidebar({ machines, selectedMachineId, selectedPaneId, stat
   // shared with the other browsers of this server (lib/preferencesSync.ts)
   const pinned = useSyncExternalStore(subscribeSidebarPins, currentSidebarPins, currentSidebarPins);
   const activity = useSidebarActivity();
-  // Settings → Agents order: herdr's order, or Activity within each PC (each herdr counts its own changes)
+  // Settings → Agents order: herdr's order PC by PC, or Activity across every PC as herdr's TUI does
   const byActivity = settings.agentOrder === "activity";
-  const rows = useMemo(() => machines.flatMap((machine) => {
-    const agents = sidebarAgents(machine.snapshot);
-    return (byActivity ? activityOrder(agents, (entry) => entry.pane, activity.seqs(machine.id)) : agents).map((entry): AgentRow => ({ machine, entry }));
-  }), [machines, byActivity, activity]);
+  const rows = useMemo(() => {
+    const all = machines.flatMap((machine) => sidebarAgents(machine.snapshot).map((entry): AgentRow => ({ machine, entry })));
+    return byActivity ? activityOrder(all, ({ machine, entry }) => ({ status: activity.status(machine.id, entry.pane), recent: activity.seqs(machine.id).get(entry.pane.pane_id), stale: machine.state !== "connected" })) : all;
+  }, [machines, byActivity, activity]);
   // the pinned rows stand first, in the order they were pinned
   const split = useMemo(() => splitPinnedRows(rows, pinned, ({ machine, entry }) => sidebarPinKey(machine.id, entry.pane.pane_id)), [rows, pinned]);
   const togglePin = (key: string): void => {

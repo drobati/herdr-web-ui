@@ -25,6 +25,7 @@ import { useMachineApi, useMachineId } from "../lib/machineContext.tsx";
 import { useMediaQuery } from "../lib/useMediaQuery.ts";
 import { useTabReorder } from "../lib/useTabReorder.ts";
 import { indicatorGlyph, paneStatus, rollupStatus } from "../lib/status.ts";
+import { useSidebarActivity } from "../lib/sidebarActivity.tsx";
 import { useSettings } from "../lib/settings.ts";
 import { AgentMark } from "./AgentMark.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
@@ -53,6 +54,7 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
   const t = useT();
   const { settings } = useSettings();
   const machineId = useMachineId();
+  const activity = useSidebarActivity();
   const { closeTab, renameTab, moveTab } = useMachineApi();
   const touchMenu = useMediaQuery("(pointer: coarse), (max-width: 768px)");
   const soloPanes = useMediaQuery(SOLO_PANE_QUERY);
@@ -360,7 +362,7 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
           const active = tab.tab_id === selectedPane.tab_id;
           const own = panesOf(tab);
           // Settle each pane's wait before rolling up, so a sibling's RUN or DONE stays visible.
-          const status = rollupStatus(own.map((pane) => paneStatus(pane as HerdrPane)));
+          const status = rollupStatus(own.map((pane) => activity.status(machineId, pane as HerdrPane)));
           const pickerOpen = picker?.tab.tab_id === tab.tab_id;
           const name = nameOf(tab);
           return (

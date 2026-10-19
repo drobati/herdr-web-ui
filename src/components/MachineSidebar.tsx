@@ -9,7 +9,6 @@ import type { AppActions } from "../lib/actions.ts";
 import { useInstallPrompt } from "../lib/install.ts";
 import { Sidebar } from "./Sidebar.tsx";
 import { AgentSidebar } from "./AgentSidebar.tsx";
-import { SidebarActivityProvider, useSidebarActivityState } from "../lib/sidebarActivity.tsx";
 import { UsageMeters } from "./UsageMeters.tsx";
 import "./Machines.css";
 import { useT } from "../lib/i18n.ts";
@@ -28,10 +27,8 @@ export function MachineSidebar(props: Props) {
   const t = useT();
   const { canInstall, installed, install, help } = useInstallPrompt();
   const [installHelpOpen, setInstallHelpOpen] = useState(false);
-  // both lists draw from it: live counters per PC (lib/sidebarActivity.tsx)
-  const activity = useSidebarActivityState(props.machines);
   // no top bar: a workspace starts from its PC's header, and Add PC lives in Settings → Remote PCs
-  return <SidebarActivityProvider value={activity}><div className="sidebar-shell">
+  return <div className="sidebar-shell">
     <div className="machine-list" aria-label={t("PCs and workspaces")}>
       {props.machines.map((machine) => <MachineGroup key={machine.id} {...props} machine={machine} />)}
       {!props.machines.length && <p className="tree-state" role="status">{t("Loading PCs…")}</p>}
@@ -46,7 +43,7 @@ export function MachineSidebar(props: Props) {
         <UsageMeters />
       </div>
     </footer>
-  </div></SidebarActivityProvider>;
+  </div>;
 }
 
 function MachineGroup({ machine, ...props }: Props & { machine: Machine }) {

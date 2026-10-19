@@ -1,4 +1,5 @@
 import { MachineContext, useMachineApi, useMachineId } from "../lib/machineContext.tsx";
+import { useSidebarActivity } from "../lib/sidebarActivity.tsx";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { Bell, Columns2, CornerLeftUp, Folder, FolderOpen, FolderSearch, History, LoaderCircle, Maximize2, MessageSquarePlus, Minimize2, Monitor, PanelLeft, Pin, Plus, Puzzle, RefreshCw, Rows2, Settings, SunMoon, SwitchCamera, X } from "lucide-react";
 
@@ -7,7 +8,7 @@ import "./CommandPalette.css";
 import type { DirectoryListing, HerdrPane, PluginActions, SessionSnapshot, TabInfo } from "../../shared/protocol.ts";
 import type { Machine } from "../../shared/machines.ts";
 import { ApiError } from "../lib/api.ts";
-import { paneStatus, STATUS_WORD } from "../lib/status.ts";
+import { STATUS_WORD } from "../lib/status.ts";
 import { zoomMode } from "../lib/layoutMap.ts";
 import type { AppActions, PaneView } from "../lib/actions.ts";
 import { FILTER_KEYS, offeredPluginActions, parseQuery, STATUS_FILTERS, statusCounts, type OfferedPluginAction, type PaletteStatusFilter } from "../lib/paletteSearch.ts";
@@ -149,6 +150,7 @@ function ShortcutHint({ shortcutId }: { shortcutId?: ShortcutId }) {
 export function CommandPalette({ open, initialQuery = "", onClose, machines, onSelect, snapshot, online, selectedPaneId, view, actions }: CommandPaletteProps) {
   const t = useT();
   const machineId = useMachineId();
+  const activity = useSidebarActivity();
   const api = useMachineApi();
   const touch = useMediaQuery("(pointer: coarse)");
   const [query, setQuery] = useState("");
@@ -673,7 +675,7 @@ export function CommandPalette({ open, initialQuery = "", onClose, machines, onS
                   <button key={targetKey(row)} data-machine={row.machineId} data-pane={pane.pane_id} id={`palette-item-${index}`} type="button" role="option" className="menu-item palette-pane" aria-selected={activeIndex === index} aria-current={selected ? "true" : undefined} onFocus={() => select(index)} onMouseMove={() => select(index)} onClick={() => runPane(row)}>
                     <span className="palette-mark"><AgentMark agent={pane.agent ?? "shell"} /></span>
                     <span className="menu-item-main"><span className="palette-row-title">{displayPaneTitle(pane)}{selected && <span className="palette-selected">{t("Selected")}</span>}</span><span className="palette-row-subtitle">{place}</span></span>
-                    <StatusBadge status={paneStatus(pane)} />
+                    <StatusBadge status={activity.status(row.machineId, pane)} />
                   </button>
                 );
               })}

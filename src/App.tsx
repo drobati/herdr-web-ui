@@ -78,6 +78,7 @@ import { PaneFollowContext } from "./lib/paneSubmitContext.ts";
 import { SplitDropPreview } from "./components/SplitDropPreview.tsx";
 import { CrashProbe, RegionCrash } from "./components/AppCrash.tsx";
 import { RenderBoundary } from "./components/RenderBoundary.tsx";
+import { SidebarActivityProvider, useSidebarActivityState } from "./lib/sidebarActivity.tsx";
 
 const APP_TITLE = "herdr web ui";
 /** how soon after a key press a focus counts as the user's own (lastKeyAtRef) */
@@ -245,6 +246,8 @@ export function App() {
     if (initialLink && (initialLink.workspace || fileFromLink(initialLink))) return null;
     return storedSelection()?.pane_id ?? null;
   });
+  // the sidebar and the tab strips draw states from it: finishes not looked at, live counters (lib/sidebarActivity.tsx)
+  const activity = useSidebarActivityState(machines, selectedMachineId, selectedPaneId);
   const [notificationViewTarget, setNotificationViewTarget] = useState<NotificationTarget | null>(
     () => notificationTargetFromSearch(window.location.search),
   );
@@ -1360,7 +1363,7 @@ export function App() {
   if (locked) return <AccessGate reason={lockReason} initialCode={pairCode} onUnlocked={unlock} />;
 
   return (
-    <MachineSessionsProvider machineIds={machines.map((machine) => machine.id)}><MachineContext.Provider value={selectedMachineId}><div className={`app${sidebarCollapsed ? " sidebar-collapsed" : ""}`} style={sidebarWidth === null ? undefined : { "--sidebar-user-w": `${sidebarWidth}px` } as CSSProperties}>
+    <MachineSessionsProvider machineIds={machines.map((machine) => machine.id)}><SidebarActivityProvider value={activity}><MachineContext.Provider value={selectedMachineId}><div className={`app${sidebarCollapsed ? " sidebar-collapsed" : ""}`} style={sidebarWidth === null ? undefined : { "--sidebar-user-w": `${sidebarWidth}px` } as CSSProperties}>
       <header className={`app-header is-zoned${chatShown ? " is-chat" : ""}`}>
         {/* is-zoned tells this header from the connecting shell's, which has no zones to draw.
             .header-side is the sidebar's own top row from 769px (styles.css); below that its
@@ -1668,6 +1671,6 @@ export function App() {
         <FileViewer key={viewing.path} path={viewing.path} paneId={viewing.paneId} onClose={closeFile} onOpen={(path) => openFile({ ...viewing, path })} keyboardActive={!settingsOpen} />
       </MachineContext.Provider>}
       <CommandPalette key={selectedMachineId} machines={machines} onSelect={selectTarget} open={paletteOpen} initialQuery={paletteQuery} onClose={() => setPaletteOpen(false)} snapshot={snapshot} online={selectedMachine?.state === "connected"} selectedPaneId={selectedPaneId} view={view} actions={actions} />
-    </div></MachineContext.Provider></MachineSessionsProvider>
+    </div></MachineContext.Provider></SidebarActivityProvider></MachineSessionsProvider>
   );
 }

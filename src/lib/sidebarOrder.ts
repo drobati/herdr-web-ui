@@ -1,11 +1,11 @@
 /**
  * The sidebar's Activity order for the Agents list.
  *
- * Activity keeps a waiting agent on top and then the latest change, so the latest work is where
- * you look. Recency is herdr's `state_change_seq`, one counter per herdr session bumped on every
+ * Activity is herdr's TUI priority order: state first, then the latest change, across every PC.
+ * Recency starts from herdr's `state_change_seq`, one counter per herdr session bumped on every
  * agent state change. `session.snapshot` leaves it off `panes` and carries it on `agents`.
  */
-import type { AgentStatus, HerdrPane, PaneInfo, SessionSnapshot } from "../../shared/protocol.ts";
+import type { AgentStatus, HerdrPane, SessionSnapshot } from "../../shared/protocol.ts";
 import { knownStatus, paneStatus } from "./status.ts";
 
 /** Each agent pane's `state_change_seq`. Panes without an agent have none. */
@@ -71,17 +71,77 @@ export function shownStatus(pane: Pick<HerdrPane, "agent_status" | "background_w
 }
 
 /**
- * Rows in Activity order: a blocked one first, then the most recent state change, then the
- * order given. State is not ranked otherwise: ranking moved a row the moment its state changed (a
- * pane sent a message fell below every DONE while it ran and jumped back when it finished), where
- * recency keeps the row just worked in on top while it runs and after it finishes.
+ * When this page saw each pane's counter move, on one count shared by every PC (herdr's
+ * client/shell/endpoints.rs `agent_recency`): herdr counts per session, so its counters do not
+ * compare across PCs. A pane first seen, or whose counter moved, takes the next count, in its
+ * counter's order. Mutates `memory` (each pane's last counter and count) and `counter`.
  */
-export function activityOrder<T>(rows: readonly T[], paneOf: (row: T) => Pick<PaneInfo, "pane_id" | "agent_status">, seqs: ReadonlyMap<string, number>): T[] {
+export interface RecencyMemory { seq: Map<string, number>; recent: Map<string, number> }
+export const newRecencyMemory = (): RecencyMemory => ({ seq: new Map(), recent: new Map() });
+export function observedRecency(seqs: ReadonlyMap<string, number>, memory: RecencyMemory, counter: { last: number }): Map<string, number> {
+  for (const [id, seq] of [...seqs].sort((a, b) => a[1] - b[1])) {
+    if (memory.seq.get(id) !== seq) memory.recent.set(id, ++counter.last);
+    memory.seq.set(id, seq);
+  }
+  for (const id of memory.seq.keys()) if (!seqs.has(id)) { memory.seq.delete(id); memory.recent.delete(id); }
+  return new Map(memory.recent);
+}
+
+/**
+ * What `seenStatuses` remembers: each pane's last herdr status, the panes seen working, the counter of
+ * each finish not looked at yet (`completed`), and the counter each pane was last looked at.
+ */
+export interface SeenMemory { status: Map<string, unknown>; working: Set<string>; completed: Map<string, number>; viewed: Map<string, number> }
+export const newSeenMemory = (): SeenMemory => ({ status: new Map(), working: new Set(), completed: new Map(), viewed: new Map() });
+
+/**
+ * DONE as herdr's TUI draws it (client/shell/endpoint_agent_state.rs): a finish not looked at yet. A
+ * pane seen working that comes to rest, or one herdr calls done, has finished; once it is shown
+ * (`viewing`, the pane on screen) at or after that counter it reads idle. herdr moving a done to idle
+ * (looked at in the TUI) clears it too. `seqs` is `liveSeqs`. Mutates `memory`.
+ */
+export function seenStatuses(snapshot: Pick<SessionSnapshot, "panes"> | null | undefined, seqs: ReadonlyMap<string, number>, viewing: string | null, memory: SeenMemory): Map<string, AgentStatus> {
+  const shown = new Map<string, AgentStatus>();
+  const panes = snapshot?.panes ?? [];
+  for (const pane of panes) {
+    const id = pane.pane_id;
+    const seq = seqs.get(id);
+    const status = knownStatus(pane.agent_status);
+    const before = memory.status.get(id);
+    memory.status.set(id, status);
+    if (seq === undefined) continue;
+    if (status === "working") { memory.working.add(id); memory.completed.delete(id); }
+    else if (status === "done" || status === "idle") {
+      if (memory.working.delete(id)) memory.completed.set(id, seq);
+      else if (status === "done" && !memory.completed.has(id)) memory.completed.set(id, seq);
+      else if (status === "idle" && before === "done") memory.completed.delete(id);
+    } else { memory.working.delete(id); memory.completed.delete(id); }
+    if (id === viewing) memory.viewed.set(id, seq);
+    const finish = memory.completed.get(id);
+    if (status === "done" || status === "idle") shown.set(id, finish !== undefined && !((memory.viewed.get(id) ?? -1) >= finish) ? "done" : "idle");
+  }
+  if (panes.length > 0) {
+    const open = new Set(panes.map((pane) => pane.pane_id));
+    for (const map of [memory.status, memory.completed, memory.viewed]) for (const id of map.keys()) if (!open.has(id)) map.delete(id);
+    for (const id of memory.working) if (!open.has(id)) memory.working.delete(id);
+  }
+  return shown;
+}
+
+/** a state's rank in herdr's TUI priority order (client/shell.rs `status_priority`); BG is busy, as RUN */
+const PRIORITY: Readonly<Record<string, number>> = { blocked: 4, done: 3, working: 2, waiting: 2, idle: 1 };
+
+/**
+ * Rows in Activity order, herdr's TUI priority order (client/shell/aggregate_navigation.rs): a PC
+ * that is not connected last, then blocked, done, working, idle, then the latest change seen, then
+ * the order given.
+ */
+export function activityOrder<T>(rows: readonly T[], rowOf: (row: T) => { status: AgentStatus | undefined; recent: number | undefined; stale?: boolean }): T[] {
   return rows
     .map((row, index) => {
-      const pane = paneOf(row);
-      return { row, index, rank: knownStatus(pane.agent_status) === "blocked" ? 0 : 1, recent: seqs.get(pane.pane_id) ?? -1 };
+      const { status, recent, stale } = rowOf(row);
+      return { row, index, stale: stale ? 1 : 0, rank: PRIORITY[knownStatus(status)] ?? 0, recent: recent ?? -1 };
     })
-    .sort((a, b) => a.rank - b.rank || b.recent - a.recent || a.index - b.index)
+    .sort((a, b) => a.stale - b.stale || b.rank - a.rank || b.recent - a.recent || a.index - b.index)
     .map((entry) => entry.row);
 }

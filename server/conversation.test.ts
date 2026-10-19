@@ -267,6 +267,18 @@ describe("parseClaudeTranscript", () => {
     ]);
   });
 
+  it("shows Claude Code's recap for someone coming back to the session", () => {
+    // Claude Code 2.1.288 writes the terminal's "※ recap" line as an away_summary
+    const recap = (content: string, ts: string) => JSON.stringify({ type: "system", subtype: "away_summary", content, timestamp: ts });
+    const turns = parseClaudeTranscript([
+      recap("You're clearing ghost Alt-Tab entries. Next, approve restarting Explorer.", "2026-10-03T16:57:14.752Z"),
+      recap("  ", "2026-10-03T17:00:00.000Z"),
+    ].join("\n"));
+    expect(turns).toEqual([
+      { role: "user", ts: "2026-10-03T16:57:14.752Z", parts: [{ kind: "notice", text: "You're clearing ghost Alt-Tab entries. Next, approve restarting Explorer.", source: "recap" }] },
+    ]);
+  });
+
   it("keeps a notice joined from long lines within the notice's length", () => {
     const info = (content: string, ts: string) => JSON.stringify({ type: "system", subtype: "informational", content, timestamp: ts });
     const [turn] = parseClaudeTranscript([

@@ -64,14 +64,11 @@ describe("preferences sync", () => {
     });
   });
 
-  it("joins this browser's pins to the first the server holds, then follows the last write", () => {
-    const first = takePreferences(base(DEFAULT_SETTINGS, null), { settings: DEFAULT_SETTINGS, pins: ["local:w1:p1"] }, { revision: 1, settings: {}, pins: ["pc:w2:p3", "local:w1:p1"] }, null);
-    expect(first.pins).toEqual(["pc:w2:p3", "local:w1:p1"]);
-    expect(first.base.pins).toEqual(["pc:w2:p3", "local:w1:p1"]);
-    const joined = takePreferences(base(DEFAULT_SETTINGS, null), { settings: DEFAULT_SETTINGS, pins: ["local:w1:p1"] }, { revision: 1, settings: {}, pins: ["pc:w2:p3"] }, null);
-    expect(joined.pins).toEqual(["pc:w2:p3", "local:w1:p1"]);
-    // the join is this browser's change: it goes out
-    expect(preferencesChange(joined.base, { settings: DEFAULT_SETTINGS, pins: joined.pins! })).toEqual({ settings: {}, pins: ["pc:w2:p3", "local:w1:p1"] });
+  it("takes the server's pins on load, so a stale browser cannot re-pin, then follows the last write", () => {
+    // this browser still holds a pin another browser removed
+    const loaded = takePreferences(base(DEFAULT_SETTINGS, null), { settings: DEFAULT_SETTINGS, pins: ["local:w1:p1"] }, { revision: 1, settings: {}, pins: ["pc:w2:p3"] }, null);
+    expect(loaded.pins).toEqual(["pc:w2:p3"]);
+    expect(preferencesChange(loaded.base, { settings: DEFAULT_SETTINGS, pins: loaded.pins! })).toBeNull();
     const later = takePreferences(base(DEFAULT_SETTINGS, ["pc:w2:p3"]), { settings: DEFAULT_SETTINGS, pins: ["pc:w2:p3"] }, { revision: 2, settings: {}, pins: [] }, null);
     expect(later.pins).toEqual([]);
     // a pin made here and not yet sent stays

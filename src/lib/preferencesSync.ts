@@ -55,8 +55,8 @@ export interface Taken {
  * answers: a value the server took is no longer this browser's own, so the document's stands (a
  * document from before the change landed is held until the answer, lib/preferencesSync.ts). With
  * `force` (a watching device, which sends nothing) every value is taken. The
- * baseline takes the server's values either way. The first pins the server holds join this browser's:
- * nobody loses pins when a server begins sharing them; after that the last write wins.
+ * baseline takes the server's values either way. Pins the server holds replace this browser's on load;
+ * after that the last write wins.
  */
 export function takePreferences(base: Baseline, local: Local, remote: SharedPreferences, inFlight: PreferencesChange | null, force = false): Taken {
   const settings: Shared = { ...base.settings };
@@ -84,7 +84,8 @@ export function takePreferences(base: Baseline, local: Local, remote: SharedPref
   settings.palette = mirrorPalette(settings.theme, settings.darkTheme ?? DEFAULT_THEME, settings.lightTheme ?? DEFAULT_THEME);
   let pins: string[] | null = null;
   if (remote.pins !== undefined) {
-    if (base.pins === null && !force) pins = [...remote.pins, ...local.pins.filter((pin) => !remote.pins!.includes(pin))];
+    // every page load starts with base.pins null, so a join here re-adds pins another browser removed
+    if (base.pins === null) pins = [...remote.pins];
     else {
       const sent = inFlight?.pins !== undefined && same(inFlight.pins, local.pins);
       const edited = !same(local.pins, base.pins) && !sent;

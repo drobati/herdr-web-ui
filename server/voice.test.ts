@@ -246,6 +246,19 @@ describe("voice transcribe", () => {
     expect(requests.map((request) => request.url)).toEqual(["https://api.openai.com/v1/audio/transcriptions", "https://api.openai.com/v1/chat/completions"]);
   });
 
+  it("turns reasoning off for OpenRouter's openai/ model names too", async () => {
+    let body: Record<string, unknown> = {};
+    handler = (url, init) => {
+      if (url.endsWith("/audio/transcriptions")) return transcriptAnswer();
+      body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return Response.json({ choices: [{ message: { content: "tidy" } }] });
+    };
+    const voice = service({ HERDR_WEB_OPENAI_API_KEY: KEY });
+    voice.update({ polish_model: "openai/gpt-5.4-mini" });
+    await events(await transcribe(voice, clipForm({ polish: "1" })));
+    expect(body).toMatchObject({ model: "openai/gpt-5.4-mini", reasoning_effort: "none" });
+  });
+
   it("sends a model without a reasoning setting a fixed temperature instead", async () => {
     let body: Record<string, unknown> = {};
     handler = (url, init) => {

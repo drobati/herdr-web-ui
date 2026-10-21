@@ -56,10 +56,10 @@ export function shownStatus(pane: FinishPane, seen: SeenRecord | null): AgentSta
   return seen && isSeenDone(pane, seen) ? "idle" : pane.agent_status;
 }
 
-/** herdr TUI's `status_priority` (client/shell.rs); waiting (BG) is still working */
-const PRIORITY: Readonly<Record<string, number>> = { blocked: 0, done: 1, working: 2, waiting: 2, idle: 3 };
+/** Derek's order: busy above finished (the TUI's `status_priority` puts done first); waiting (BG) is busy */
+const PRIORITY: Readonly<Record<string, number>> = { blocked: 0, working: 1, waiting: 1, done: 2, idle: 3 };
 
-/** herdr TUI's priority order (blocked, done, working, idle, unknown), then herdr's latest state change, then the order given. */
+/** Blocked, busy, done, idle, unknown; then herdr's latest state change, then the order given. */
 export function activityOrder<T>(rows: readonly T[], paneOf: (row: T) => { pane_id: string; agent_status?: AgentStatus }, seqs: ReadonlyMap<string, number>): T[] {
   return rows
     .map((row, index) => {

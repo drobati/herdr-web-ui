@@ -1,7 +1,7 @@
 /**
  * The Agents list's rows in the order it draws them, for the list itself and for the keyboard's
  * "next agent needing attention" (lib/attentionJump.ts): the pinned card first, in pin order, then
- * every PC's agents in the roster's order, or in that PC's own Activity order when Settings asks
+ * every PC's agents in the roster's order, or all PCs in one Activity order when Settings asks
  * for it (lib/sidebarOrder.ts). A row is its PC and its pane: two PCs may reuse a pane id.
  */
 import type { Machine } from "../../shared/machines.ts";
@@ -13,10 +13,12 @@ import { sidebarPinKey, splitPinnedRows } from "./sidebarPins.ts";
 export interface AgentRow { machine: Machine; entry: SidebarAgent }
 
 export interface AgentRosterOptions {
-  /** Settings → Agents order: Activity sorts each PC's rows by that PC's own counters */
+  /** Settings → Agents order: Activity sorts by status, then recency (one list with `recency`, else per PC) */
   byActivity: boolean;
   /** a PC's state-change counters, as lib/sidebarActivity.tsx keeps them */
   seqs(machineId: string): ReadonlyMap<string, number>;
+  /** every PC's panes on one recency (SidebarActivity.recency): Activity sorts all PCs as one list */
+  recency?: ReadonlyMap<string, number>;
   /** the status a row shows (lib/sidebarActivity.tsx): a DONE already read sorts as idle */
   status?: SidebarActivity["status"];
   /** the pinned rows' keys (lib/sidebarPins.ts), in pin order */
@@ -25,10 +27,16 @@ export interface AgentRosterOptions {
 
 /** Every PC's agent rows as the list draws them: the pinned ones first, then the rest in source order. */
 export function agentRoster(machines: readonly Machine[], options: AgentRosterOptions): { pinned: AgentRow[]; rest: AgentRow[] } {
-  const rows = machines.flatMap((machine) => {
+  let rows = machines.flatMap((machine) => {
     const agents = sidebarAgents(machine.snapshot);
     const shown = (entry: SidebarAgent) => options.status ? { pane_id: entry.pane.pane_id, agent_status: options.status(machine.id, entry.pane) } : entry.pane;
-    return (options.byActivity ? activityOrder(agents, shown, options.seqs(machine.id)) : agents).map((entry): AgentRow => ({ machine, entry }));
+    return (options.byActivity && !options.recency ? activityOrder(agents, shown, options.seqs(machine.id)) : agents).map((entry): AgentRow => ({ machine, entry }));
   });
+  if (options.byActivity && options.recency) {
+    rows = activityOrder(rows, ({ machine, entry }) => ({
+      pane_id: sidebarPinKey(machine.id, entry.pane.pane_id),
+      agent_status: options.status ? options.status(machine.id, entry.pane) : entry.pane.agent_status,
+    }), options.recency);
+  }
   return splitPinnedRows(rows, options.pinned, ({ machine, entry }) => sidebarPinKey(machine.id, entry.pane.pane_id));
 }

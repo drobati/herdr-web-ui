@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentStatus, HerdrPane, SessionSnapshot } from "../../shared/protocol.ts";
 import machines from "../../site/demo/fixtures/machines.json";
-import { activityOrder, isSeenDone, liveSeqs, newSeqMemory, shownStatus, stateSeqs } from "./sidebarOrder.ts";
+import { activityOrder, isSeenDone, liveSeqs, newObserved, newSeqMemory, observeRecency, shownStatus, stateSeqs } from "./sidebarOrder.ts";
 import { DEFAULT_SETTINGS, sanitizeSettings } from "./settings.ts";
 
 const template = machines.machines[0]!.snapshot!;
@@ -118,4 +118,34 @@ it("defaults to herdr's order and accepts only known settings", () => {
   expect(DEFAULT_SETTINGS.agentOrder).toBe("workspace");
   expect(sanitizeSettings({ agentOrder: "activity" })).toMatchObject({ agentOrder: "activity" });
   expect(sanitizeSettings({ agentOrder: "recent" })).toMatchObject({ agentOrder: "workspace" });
+});
+
+describe("one recency across PCs", () => {
+  const pcs = (a: Record<string, number>, b: Record<string, number>) => new Map([["a", new Map(Object.entries(a))], ["b", new Map(Object.entries(b))]]);
+
+  it("interleaves panes first seen together by their place in their own PC, below any live change", () => {
+    const observed = newObserved();
+    const first = observeRecency(observed, pcs({ x: 100, y: 200 }, { z: 5 }));
+    expect(first.get("a:y")!).toBeGreaterThan(first.get("a:x")!);
+    expect(first.get("b:z")!).toBeLessThan(1);
+    const next = observeRecency(observed, pcs({ x: 100, y: 200 }, { z: 6 }));
+    expect(next.get("b:z")!).toBeGreaterThan(next.get("a:y")!);
+    expect(next.get("a:y")).toBe(first.get("a:y"));
+  });
+
+  it("sorts every PC in one list: a change on one PC passes an older one on another", () => {
+    const observed = newObserved();
+    observeRecency(observed, pcs({ x: 1 }, { z: 900 }));
+    const recency = observeRecency(observed, pcs({ x: 2 }, { z: 900 }));
+    const rows = [{ key: "b:z", s: "working" as AgentStatus }, { key: "a:x", s: "working" as AgentStatus }];
+    expect(activityOrder(rows, (r) => ({ pane_id: r.key, agent_status: r.s }), recency).map((r) => r.key)).toEqual(["a:x", "b:z"]);
+  });
+
+  it("forgets panes that are gone, so one coming back is not dated by its old change", () => {
+    const observed = newObserved();
+    observeRecency(observed, pcs({ x: 1 }, {}));
+    observeRecency(observed, pcs({ x: 2 }, {}));
+    observeRecency(observed, pcs({}, {}));
+    expect(observeRecency(observed, pcs({ x: 2 }, {})).get("a:x")!).toBeLessThan(1);
+  });
 });

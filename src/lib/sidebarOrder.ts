@@ -69,3 +69,27 @@ export function activityOrder<T>(rows: readonly T[], paneOf: (row: T) => { pane_
     .sort((a, b) => a.rank - b.rank || b.recent - a.recent || a.index - b.index)
     .map((entry) => entry.row);
 }
+
+/**
+ * One recency for every PC, so Activity can sort them as one list: each PC's herdr counts its own
+ * changes, so the browser numbers the changes it sees in one sequence. Panes first seen together
+ * (page load, a PC connecting) get (0, 1) by their place in their PC's own order, below any change seen live.
+ */
+export interface Observed { next: number; at: Map<string, { seq: number; at: number }> }
+export const newObserved = (): Observed => ({ next: 0, at: new Map() });
+export function observeRecency(observed: Observed, byMachine: ReadonlyMap<string, ReadonlyMap<string, number>>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [machine, seqs] of byMachine) {
+    const ordered = [...seqs].sort((a, b) => a[1] - b[1]);
+    ordered.forEach(([pane, seq], i) => {
+      const key = `${machine}:${pane}`; // sidebarPinKey's form
+      let seen = observed.at.get(key);
+      if (!seen) seen = { seq, at: (i + 1) / (ordered.length + 1) };
+      else if (seen.seq !== seq) seen = { seq, at: ++observed.next };
+      observed.at.set(key, seen);
+      out.set(key, seen.at);
+    });
+  }
+  for (const key of observed.at.keys()) if (!out.has(key)) observed.at.delete(key);
+  return out;
+}

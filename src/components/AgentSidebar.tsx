@@ -102,7 +102,7 @@ export function AgentSidebar({ machines, selectedMachineId, selectedPaneId, stat
   // the pinned rows stand first, in the order they were pinned. The keyboard's next agent needing
   // attention walks this same order (lib/agentRoster.ts)
   const byActivity = settings.agentOrder === "activity";
-  const split = useMemo(() => agentRoster(machines, { byActivity, seqs: activity.seqs, status: activity.status, pinned }), [machines, byActivity, activity, pinned]);
+  const split = useMemo(() => agentRoster(machines, { byActivity, seqs: activity.seqs, recency: activity.recency(), status: activity.status, pinned }), [machines, byActivity, activity, pinned]);
   const rows = useMemo(() => [...split.pinned, ...split.rest], [split]);
   const togglePin = (key: string): void => {
     // pins of panes gone from this server leave with a change of the user's, never by themselves: the

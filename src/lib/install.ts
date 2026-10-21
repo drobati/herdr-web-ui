@@ -130,13 +130,16 @@ export interface InstallEnvironment {
   maxTouchPoints: number;
 }
 
+/** Firefox on desktop has no way to install a web app: the sidebar leaves its Install button out there. */
+export const cannotInstall = (userAgent: string): boolean => /Firefox\//.test(userAgent) && !/Android/.test(userAgent);
+
 /** How to install when the browser offers no prompt of its own (iOS never does). */
 export function installHelp(env: InstallEnvironment): string {
   const ua = env.userAgent;
   const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && env.maxTouchPoints > 1);
   if (ios) return t("Tap the Share button, then Add to Home Screen.");
   if (!env.secure) return t("Open this page over HTTPS (or on localhost) to install it.");
-  if (/Firefox\//.test(ua) && !/Android/.test(ua)) return t("Firefox on desktop can't install web apps. Open this page in Chrome or Edge.");
+  if (cannotInstall(ua)) return t("Firefox on desktop can't install web apps. Open this page in Chrome or Edge.");
   if (/Android/.test(ua)) return t("Open the browser menu, then Install app or Add to Home screen.");
   if (/Safari\//.test(ua) && !/Chrome\/|Chromium\/|Edg\//.test(ua)) return t("Choose File, then Add to Dock.");
   return t("Use the install icon in the address bar, or the browser menu's Install option.");

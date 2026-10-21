@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { installedState, installHelp, isAppWindow, type InstalledStateInput } from "./install.ts";
+import { cannotInstall, installedState, installHelp, isAppWindow, type InstalledStateInput } from "./install.ts";
 
 const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
 const IPAD = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
@@ -155,5 +155,13 @@ describe("isAppWindow", () => {
   it("is a plain browser tab even after an app window was seen", () => {
     expect(inWindow(["standalone"])).toBe(true);
     expect(inWindow(["browser"])).toBe(false);
+  });
+});
+
+describe("cannotInstall", () => {
+  it("is desktop Firefox only", () => {
+    expect(cannotInstall("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0")).toBe(true);
+    expect(cannotInstall("Mozilla/5.0 (Android 15; Mobile; rv:150.0) Gecko/150.0 Firefox/150.0")).toBe(false);
+    expect(cannotInstall("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0 Safari/537.36")).toBe(false);
   });
 });

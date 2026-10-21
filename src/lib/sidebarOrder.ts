@@ -1,5 +1,5 @@
 /** Activity order uses raw statuses and herdr recency; opened finishes use only bridge finish IDs. */
-import type { AgentStatus, HerdrPane, PaneInfo, SessionSnapshot } from "../../shared/protocol.ts";
+import type { AgentStatus, HerdrPane, SessionSnapshot } from "../../shared/protocol.ts";
 import { knownStatus, paneStatus } from "./status.ts";
 
 export type SeenRecord = Readonly<Record<string, number>>;
@@ -56,12 +56,15 @@ export function shownStatus(pane: FinishPane, seen: SeenRecord | null): AgentSta
   return seen && isSeenDone(pane, seen) ? "idle" : pane.agent_status;
 }
 
-/** Blocked first, then herdr's latest state change, then the order given. */
-export function activityOrder<T>(rows: readonly T[], paneOf: (row: T) => Pick<PaneInfo, "pane_id" | "agent_status">, seqs: ReadonlyMap<string, number>): T[] {
+/** herdr TUI's `status_priority` (client/shell.rs); waiting (BG) is still working */
+const PRIORITY: Readonly<Record<string, number>> = { blocked: 0, done: 1, working: 2, waiting: 2, idle: 3 };
+
+/** herdr TUI's priority order (blocked, done, working, idle, unknown), then herdr's latest state change, then the order given. */
+export function activityOrder<T>(rows: readonly T[], paneOf: (row: T) => { pane_id: string; agent_status?: AgentStatus }, seqs: ReadonlyMap<string, number>): T[] {
   return rows
     .map((row, index) => {
       const pane = paneOf(row);
-      return { row, index, rank: knownStatus(pane.agent_status) === "blocked" ? 0 : 1, recent: seqs.get(pane.pane_id) ?? -1 };
+      return { row, index, rank: PRIORITY[knownStatus(pane.agent_status)] ?? 4, recent: seqs.get(pane.pane_id) ?? -1 };
     })
     .sort((a, b) => a.rank - b.rank || b.recent - a.recent || a.index - b.index)
     .map((entry) => entry.row);

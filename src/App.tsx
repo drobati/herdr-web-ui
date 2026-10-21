@@ -1399,7 +1399,7 @@ export function App() {
       selectNextAttention: () => {
         // the Agents list's rows as it draws them, read at the press (lib/attentionJump.ts): a PC gone
         // away or a finish read meanwhile is never jumped to
-        const roster = agentRoster(machinesRef.current, { byActivity: settings.agentOrder === "activity", seqs: activityRef.current.seqs, pinned: currentSidebarPins() });
+        const roster = agentRoster(machinesRef.current, { byActivity: settings.agentOrder === "activity", seqs: activityRef.current.seqs, status: activityRef.current.status, pinned: currentSidebarPins() });
         const target = nextAttentionTarget(attentionCandidates([...roster.pinned, ...roster.rest], activityRef.current.status), selectionRef.current);
         if (target === null) return false;
         // this browser's pick alone, as a sidebar tap: herdr's focus and the other devices stay put

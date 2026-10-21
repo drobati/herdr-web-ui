@@ -28,6 +28,11 @@ describe("activity counters, independent of opened finishes", () => {
     expect(activityOrder(rows, (p) => p, new Map([["dated", 0]])).map((p) => p.pane_id)).toEqual(["dated", "missing-a", "missing-b"]);
   });
 
+  it("ranks as herdr's TUI does: blocked, done, working, idle, then recency", () => {
+    const rows = [pane("i", "idle"), pane("w", "working"), pane("d", "done"), pane("b", "blocked"), pane("w2", "working")];
+    expect(activityOrder(rows, (p) => p, new Map([["w", 1], ["w2", 2]])).map((p) => p.pane_id)).toEqual(["b", "d", "w2", "w", "i"]);
+  });
+
   it("drops stand-ins when herdr's real counter arrives without another status change", () => {
     const memory = newSeqMemory();
     liveSeqs(snap({ a: "working" }, { a: 1 }), memory);
@@ -72,11 +77,11 @@ describe("activity counters, independent of opened finishes", () => {
     expect([...liveSeqs(snap({ a: "idle", shell: "working", c: "done" }, { a: 5, c: 7 }), memory)]).toEqual([["a", 5], ["c", 7]]);
   });
 
-  it("ranks blocked first, then raw recency, with stable ties", () => {
+  it("ranks by TUI priority, then raw recency, with stable ties", () => {
     const panes = [pane("old", "done", 1), pane("working", "working"), pane("blocked", "blocked"), pane("new", "done", 1), pane("tie", "idle")];
     const seqs = new Map([["old", 20], ["working", 10], ["blocked", 1], ["new", 30], ["tie", 30]]);
-    expect(activityOrder(panes, (p) => p, seqs).map((p) => p.pane_id)).toEqual(["blocked", "new", "tie", "old", "working"]);
-    expect(activityOrder(panes, (p) => p, new Map([...seqs, ["working", 60]])).map((p) => p.pane_id).slice(0, 2)).toEqual(["blocked", "working"]);
+    expect(activityOrder(panes, (p) => p, seqs).map((p) => p.pane_id)).toEqual(["blocked", "new", "old", "working", "tie"]);
+    expect(activityOrder(panes, (p) => p, new Map([...seqs, ["working", 60]])).map((p) => p.pane_id).slice(0, 3)).toEqual(["blocked", "new", "old"]);
   });
 
   it("drops pre-restart stand-ins for an older bridge with no finish epoch", () => {
@@ -86,7 +91,7 @@ describe("activity counters, independent of opened finishes", () => {
     liveSeqs(snap({ a: "working", b: "done", c: "idle" }, { a: 2, b: 3, c: 1 }), memory);
     const latest = snap({ a: "working", b: "done", c: "working" }, { a: 2, b: 3, c: 9 });
     const seqs = liveSeqs(latest, memory);
-    expect(activityOrder(latest.panes, (pane) => pane, seqs).map((pane) => pane.pane_id)).toEqual(["c", "b", "a"]);
+    expect(activityOrder(latest.panes, (pane) => pane, seqs).map((pane) => pane.pane_id)).toEqual(["b", "c", "a"]);
     expect(memory.bumped.size).toBe(0);
   });
 });

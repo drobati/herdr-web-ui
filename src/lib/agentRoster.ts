@@ -6,6 +6,7 @@
  */
 import type { Machine } from "../../shared/machines.ts";
 import { sidebarAgents, type SidebarAgent } from "./sidebarAgents.ts";
+import type { SidebarActivity } from "./sidebarActivity.tsx";
 import { activityOrder } from "./sidebarOrder.ts";
 import { sidebarPinKey, splitPinnedRows } from "./sidebarPins.ts";
 
@@ -16,6 +17,8 @@ export interface AgentRosterOptions {
   byActivity: boolean;
   /** a PC's state-change counters, as lib/sidebarActivity.tsx keeps them */
   seqs(machineId: string): ReadonlyMap<string, number>;
+  /** the status a row shows (lib/sidebarActivity.tsx): a DONE already read sorts as idle */
+  status?: SidebarActivity["status"];
   /** the pinned rows' keys (lib/sidebarPins.ts), in pin order */
   pinned: readonly string[];
 }
@@ -24,7 +27,8 @@ export interface AgentRosterOptions {
 export function agentRoster(machines: readonly Machine[], options: AgentRosterOptions): { pinned: AgentRow[]; rest: AgentRow[] } {
   const rows = machines.flatMap((machine) => {
     const agents = sidebarAgents(machine.snapshot);
-    return (options.byActivity ? activityOrder(agents, (entry) => entry.pane, options.seqs(machine.id)) : agents).map((entry): AgentRow => ({ machine, entry }));
+    const shown = (entry: SidebarAgent) => options.status ? { pane_id: entry.pane.pane_id, agent_status: options.status(machine.id, entry.pane) } : entry.pane;
+    return (options.byActivity ? activityOrder(agents, shown, options.seqs(machine.id)) : agents).map((entry): AgentRow => ({ machine, entry }));
   });
   return splitPinnedRows(rows, options.pinned, ({ machine, entry }) => sidebarPinKey(machine.id, entry.pane.pane_id));
 }
